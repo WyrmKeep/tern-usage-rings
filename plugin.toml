@@ -1,0 +1,8 @@
+schema = 1
+id = "usage-rings"
+name = "Usage Rings"
+version = "0.3.0"
+description = "How much of each AI subscription you have used, as a ring per provider."
+icon = "chart"
+window = "window.luau"
+styles = ["usage-rings.css"]
