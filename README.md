@@ -48,8 +48,6 @@ Claude, Codex, Gemini, OpenCode and Grok are always listed. Any other provider o
 
 ## Where the rings sit
 
-![A Tern window with the rings docked under the tab list](screenshots/window.png)
-
 | Your tabs | The rings |
 | --- | --- |
 | Down the side | Dock under the tab filter, four to a row, up to sixteen. |
