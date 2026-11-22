@@ -7,6 +7,8 @@ end
 local function row_values(row)
 	if row.dot then
 		return "--dot:block"
+	elseif row.bar == false then
+		return "--bar:none"
 	elseif row.fill == nil then
 		return nil
 	end

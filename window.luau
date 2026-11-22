@@ -1,3 +1,7 @@
+if tern.chrome == nil or tern.chrome.widget == nil or tern.css == nil then
+	error("Usage Rings needs a Tern that has the widget bar API, such as 0.9.26")
+end
+
 local model = require("./lib/model")
 local sheet = require("./lib/sheet")
 
@@ -143,9 +147,32 @@ local function omp_candidates()
 	local candidates = { "omp" }
 	local home = tern.getenv("HOME")
 	if home ~= nil and home ~= "" then
+		local data_home = tern.getenv("XDG_DATA_HOME")
+		if data_home ~= nil and data_home ~= "" then
+			table.insert(candidates, data_home .. "/tern/omp/bin/omp")
+		end
 		table.insert(candidates, home .. "/.local/share/tern/omp/bin/omp")
+		table.insert(candidates, home .. "/Library/Application Support/Tern/omp/bin/omp")
+	end
+	local local_app_data = tern.getenv("LOCALAPPDATA")
+	if local_app_data ~= nil and local_app_data ~= "" then
+		table.insert(candidates, local_app_data .. "\\Tern\\omp\\bin\\omp.exe")
 	end
 	return candidates
+end
+
+local function decoded_json(output)
+	local first_brace = string.find(output or "", "{", 1, true)
+	if first_brace == nil then
+		return nil
+	end
+	local ok, decoded = pcall(tern.json.decode, string.sub(output, first_brace))
+	return ok and type(decoded) == "table" and decoded or nil
+end
+
+local function first_printed_line(output)
+	local printable = string.gsub(string.gsub(output or "", "\27%[[%d;]*%a", ""), "[^\n\32-\126]", "")
+	return string.match(printable, "([^%s][^\n]*)")
 end
 
 local function run_omp(args, done)
@@ -159,10 +186,10 @@ local function run_omp(args, done)
 			if result.timed_out then
 				done(nil, "omp timed out")
 			elseif result.status ~= 0 then
-				done(nil, string.match(result.stderr or "", "[^\r\n]+") or ("exit " .. tostring(result.status)))
+				done(nil, first_printed_line(result.stderr) or ("exit " .. tostring(result.status)))
 			else
-				local ok, decoded = pcall(tern.json.decode, result.stdout)
-				if ok and type(decoded) == "table" then
+				local decoded = decoded_json(result.stdout)
+				if decoded ~= nil then
 					done(decoded, nil)
 				else
 					done(nil, "omp printed no JSON")
@@ -181,10 +208,10 @@ local function run_omp(args, done)
 	try(1)
 end
 
-local function badges_without_accounts(data)
+local function badges_without_limits(data)
 	local missing, any = {}, false
 	for _, state in ipairs(model.build({ data = data, now = wall_clock_ms() })) do
-		if state.accounts == 0 then
+		if not state.has_limits then
 			missing[state.id] = true
 			any = true
 		end
@@ -246,11 +273,12 @@ function poll()
 			finish_poll(nil, nil, err)
 			return
 		end
-		local missing, any_missing = badges_without_accounts(data)
+		local missing, any_missing = badges_without_limits(data)
 		if not any_missing then
 			finish_poll(data, nil, nil)
 			return
 		end
+		store("reading", wall_clock_ms())
 		run_omp({ "usage", "--history", "--json", "-d", "1" }, function(history)
 			finish_poll(data, history ~= nil and history_for(history, data, missing) or nil, nil)
 		end)

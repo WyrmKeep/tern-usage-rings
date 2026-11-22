@@ -113,8 +113,10 @@ html.tn-widgets #widgetbar:not(.editing) .wg[data-widget='usage-rings/opencode']
 	}
 }
 
-html.tn-widgets.tabs-v:has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) {
+html.tn-widgets.tabs-v:not(.tabs-auto):has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) {
 	--ur-rows: 1;
+	--ur-cell: calc((var(--vt-w) - 28px) / 4);
+	--ur-row: 68px;
 	&:has(.wg[data-plugin='usage-rings']:nth-child(5 of .wg[data-plugin='usage-rings'])) {
 		--ur-rows: 2;
 	}
@@ -132,10 +134,26 @@ html.tn-widgets.tabs-v:has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings
 		align-items: flex-end;
 		background: none;
 	}
+	#sidebar {
+		border-bottom: calc(var(--ur-rows) * var(--ur-row) + 2px) solid transparent;
+	}
 	#widgetbar .wg.carded[data-plugin='usage-rings'] {
+		--z: 1;
+		--x: calc((var(--ur-cell) - var(--D)) / 2);
+		--y: 4px;
 		--col: 0;
 		--row: 0;
 		position: fixed;
+		left: calc(14px + var(--col) * var(--ur-cell));
+		bottom: calc(3px + (var(--ur-rows) - 1 - var(--row)) * var(--ur-row));
+		flex-direction: column;
+		justify-content: flex-start;
+		width: var(--ur-cell);
+		height: calc(var(--ur-row) - 2px) !important;
+		padding-top: var(--y) !important;
+		.wg-v {
+			margin: 3px 0 0;
+		}
 		&:nth-child(4n + 2 of .wg[data-plugin='usage-rings']) {
 			--col: 1;
 		}
@@ -154,76 +172,93 @@ html.tn-widgets.tabs-v:has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings
 		&:nth-child(n + 13 of .wg[data-plugin='usage-rings']) {
 			--row: 3;
 		}
-	}
-}
-
-html.tn-widgets.tabs-v:not(.tabs-auto):has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) {
-	--ur-cell: calc((var(--vt-w) - 28px) / 4);
-	--ur-row: 68px;
-	#sidebar {
-		border-bottom: calc(var(--ur-rows) * var(--ur-row) + 2px) solid transparent;
-	}
-	#widgetbar .wg.carded[data-plugin='usage-rings'] {
-		--z: 1;
-		--x: calc((var(--ur-cell) - var(--D)) / 2);
-		--y: 4px;
-		left: calc(14px + var(--col) * var(--ur-cell));
-		bottom: calc(3px + (var(--ur-rows) - 1 - var(--row)) * var(--ur-row));
-		flex-direction: column;
-		justify-content: flex-start;
-		width: var(--ur-cell);
-		height: calc(var(--ur-row) - 2px) !important;
-		padding-top: var(--y) !important;
-		.wg-v {
-			margin: 3px 0 0;
+		&:nth-child(n + 17 of .wg[data-plugin='usage-rings']) {
+			display: none;
 		}
 	}
 }
 
-html.tn-widgets.tabs-v.tabs-auto:has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) #widgetbar .wg.carded[data-plugin='usage-rings'] {
-	--z: 0.7;
-	--y: calc((40px - var(--D)) / 2);
-	--from-end: 0;
-	top: 0;
-	right: calc(4px + var(--from-end) * 82px);
-	height: 40px !important;
-	border-radius: 8px !important;
-	.wg-v {
-		width: 42px;
-		margin: 0 0 0 6px;
+html.tn-widgets.tabs-v.tabs-auto:is(.lay-rail, .lay-float):has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) {
+	--ur-pitch: 82px;
+	--ur-label: 42px;
+	--ur-label-gap: 6px;
+	--ur-label-size: 11px;
+	#widgetbar {
+		top: 0;
+		left: 0;
+		height: auto;
+		padding-left: calc(var(--vt-room) + 16px);
+		align-items: flex-end;
+		background: none;
 	}
-	&:nth-last-child(2 of .wg[data-plugin='usage-rings']) {
-		--from-end: 1;
+	#widgetbar .wg.carded[data-plugin='usage-rings'] {
+		--z: 0.7;
+		--y: calc((40px - var(--D)) / 2);
+		--from-end: 0;
+		position: fixed;
+		top: 0;
+		right: calc(4px + var(--from-end) * var(--ur-pitch));
+		height: 40px !important;
+		border-radius: 8px !important;
+		.wg-v {
+			width: var(--ur-label);
+			margin: 0 0 0 var(--ur-label-gap);
+			font-size: var(--ur-label-size);
+		}
+		&:nth-last-child(2 of .wg[data-plugin='usage-rings']) {
+			--from-end: 1;
+		}
+		&:nth-last-child(3 of .wg[data-plugin='usage-rings']) {
+			--from-end: 2;
+		}
+		&:nth-last-child(4 of .wg[data-plugin='usage-rings']) {
+			--from-end: 3;
+		}
+		&:nth-last-child(5 of .wg[data-plugin='usage-rings']) {
+			--from-end: 4;
+		}
+		&:nth-last-child(6 of .wg[data-plugin='usage-rings']) {
+			--from-end: 5;
+		}
+		&:nth-last-child(7 of .wg[data-plugin='usage-rings']) {
+			--from-end: 6;
+		}
+		&:nth-last-child(8 of .wg[data-plugin='usage-rings']) {
+			--from-end: 7;
+		}
+		&:nth-last-child(9 of .wg[data-plugin='usage-rings']) {
+			--from-end: 8;
+		}
+		&:nth-last-child(10 of .wg[data-plugin='usage-rings']) {
+			--from-end: 9;
+		}
+		&:nth-last-child(11 of .wg[data-plugin='usage-rings']) {
+			--from-end: 10;
+		}
+		&:nth-last-child(12 of .wg[data-plugin='usage-rings']) {
+			--from-end: 11;
+		}
+		&:nth-last-child(n + 13 of .wg[data-plugin='usage-rings']) {
+			display: none;
+		}
 	}
-	&:nth-last-child(3 of .wg[data-plugin='usage-rings']) {
-		--from-end: 2;
+}
+
+@media (max-width: 1100px) {
+	html.tn-widgets.tabs-v.tabs-auto:is(.lay-rail, .lay-float):has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']:nth-child(9 of .wg[data-plugin='usage-rings'])) {
+		--ur-pitch: 40px;
+		--ur-label: 0px;
+		--ur-label-gap: 0px;
+		--ur-label-size: 0px;
 	}
-	&:nth-last-child(4 of .wg[data-plugin='usage-rings']) {
-		--from-end: 3;
-	}
-	&:nth-last-child(5 of .wg[data-plugin='usage-rings']) {
-		--from-end: 4;
-	}
-	&:nth-last-child(6 of .wg[data-plugin='usage-rings']) {
-		--from-end: 5;
-	}
-	&:nth-last-child(7 of .wg[data-plugin='usage-rings']) {
-		--from-end: 6;
-	}
-	&:nth-last-child(8 of .wg[data-plugin='usage-rings']) {
-		--from-end: 7;
-	}
-	&:nth-last-child(9 of .wg[data-plugin='usage-rings']) {
-		--from-end: 8;
-	}
-	&:nth-last-child(10 of .wg[data-plugin='usage-rings']) {
-		--from-end: 9;
-	}
-	&:nth-last-child(11 of .wg[data-plugin='usage-rings']) {
-		--from-end: 10;
-	}
-	&:nth-last-child(12 of .wg[data-plugin='usage-rings']) {
-		--from-end: 11;
+}
+
+@media (max-width: 780px) {
+	html.tn-widgets.tabs-v.tabs-auto:is(.lay-rail, .lay-float):has(#widgetbar:not(.editing) .wg[data-plugin='usage-rings']) {
+		--ur-pitch: 40px;
+		--ur-label: 0px;
+		--ur-label-gap: 0px;
+		--ur-label-size: 0px;
 	}
 }
 
@@ -268,7 +303,7 @@ html.tn-widgets.tabs-v.tabs-auto:has(#widgetbar:not(.editing) .wg[data-plugin='u
 		&::before,
 		&::after {
 			content: '';
-			display: block;
+			display: var(--bar, block);
 			position: absolute;
 			left: 90px;
 			top: 8px;

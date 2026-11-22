@@ -7,6 +7,10 @@ local function starts_with(s, prefix)
 	return string.sub(s, 1, #prefix) == prefix
 end
 
+local function as_number(value)
+	return type(value) == "number" and value or nil
+end
+
 local KNOWN_BADGES = {
 	{ id = "claude", name = "Claude", icon = "provider:anthropic", prefixes = { "anthropic" } },
 	{ id = "codex", name = "Codex", icon = "provider:openai", prefixes = { "openai-codex" } },
@@ -74,7 +78,7 @@ local function badges_for(data, placed)
 		table.insert(badges, badge)
 		taken[badge.id] = true
 	end
-	for _, list in ipairs({ "reports", "accountsWithoutUsage", "disabledCredentials" }) do
+	for _, list in ipairs({ "reports", "accountsWithoutUsage" }) do
 		for _, item in ipairs((data or {})[list] or {}) do
 			if type(item.provider) == "string" and item.provider ~= "" and badge_for(KNOWN_BADGES, item.provider) == nil then
 				providers[item.provider] = true
@@ -129,10 +133,13 @@ local function pad_right(s, width)
 end
 
 local function truncate(s, length)
-	if utf8.len(s) <= length then
+	local count = utf8.len(s)
+	if count == nil then
+		return string.sub(s, 1, length)
+	elseif count <= length then
 		return s
 	end
-	return string.sub(s, 1, utf8.offset(s, length) - 1) .. "…"
+	return (string.gsub(string.sub(s, 1, utf8.offset(s, length) - 1), "%s+$", "")) .. "…"
 end
 
 local function without_key_separator(s)
@@ -177,24 +184,45 @@ local function time_since(ms)
 	return string.format("%d d ago", minutes // 1440)
 end
 
+local function reset_phrase(resets_at, now)
+	local reset = time_until(resets_at, now)
+	if reset == nil then
+		return nil
+	elseif reset == "now" then
+		return "resets now"
+	end
+	return "resets in " .. reset
+end
+
 local function aligned_value(used, resets_at, now)
 	if used == nil then
 		return "no data"
 	end
-	local reset = time_until(resets_at, now)
-	local tail = reset ~= nil and ("resets" .. NBSP .. "in" .. NBSP .. pad_right(reset, 6)) or pad_right("no" .. NBSP .. "reset" .. NBSP .. "time", 16)
+	local tail = pad_right((string.gsub(reset_phrase(resets_at, now) or "no reset time", " ", NBSP)), 16)
 	return ZERO_WIDTH_SPACE .. pad_left(string.format("%d%%", percent(used)), 4) .. NBSP .. "·" .. NBSP .. tail .. ZERO_WIDTH_SPACE
 end
 
-local function window_name(id, label)
+local function normal_window(id)
 	local lowered = string.lower(id or "")
-	local count, unit = string.match(lowered, "^(%d+)([hd])$")
+	local weeks = string.match(lowered, "^(%d+)w$")
+	if weeks then
+		return tostring(tonumber(weeks) * 7) .. "d"
+	end
+	return lowered
+end
+
+local function window_name(id, label, fallback)
+	local count, unit = string.match(id, "^(%d+)([hd])$")
 	if count then
 		return count .. unit
-	elseif lowered == "monthly" then
+	elseif id == "monthly" then
 		return "Monthly"
+	elseif label ~= nil and label ~= "" then
+		return label
+	elseif id ~= "" then
+		return id
 	end
-	return label or id or "?"
+	return fallback
 end
 
 local function window_id_from_label(label)
@@ -210,15 +238,26 @@ local function window_id_from_label(label)
 	return lowered
 end
 
-local function words_only_the_id_says(id, label, window)
-	local said = string.lower((label or "") .. " " .. (window or ""))
+local function id_words_the_window_omits(id, window)
+	local said = string.lower(window or "")
 	local words = {}
-	for word in string.gmatch(string.lower(string.match(id or "", "([^:]*)$")), "[^%-_%s]+") do
+	for word in string.gmatch(string.lower(string.match(tostring(id or ""), "([^:]*)$")), "[^%-_%s]+") do
 		if string.find(said, word, 1, true) == nil then
 			table.insert(words, word)
 		end
 	end
-	return table.concat(words, "-")
+	return words
+end
+
+local function label_words_the_window_omits(label, window)
+	local said = string.lower(window or "")
+	local words = {}
+	for word in string.gmatch(label or "", "%w+") do
+		if string.find(said, string.lower(word), 1, true) == nil then
+			table.insert(words, word)
+		end
+	end
+	return table.concat(words, " ")
 end
 
 local function used_fraction(amount)
@@ -228,8 +267,27 @@ local function used_fraction(amount)
 		return clamp01(amount.usedFraction)
 	elseif type(amount.remainingFraction) == "number" then
 		return clamp01(1 - amount.remainingFraction)
+	elseif type(amount.limit) == "number" and amount.limit > 0 then
+		if type(amount.used) == "number" then
+			return clamp01(amount.used / amount.limit)
+		elseif type(amount.remaining) == "number" then
+			return clamp01(1 - amount.remaining / amount.limit)
+		end
 	end
 	return nil
+end
+
+local function amount_text(value, unit)
+	local size = math.abs(value)
+	local whole = size >= 100 or size == math.floor(size)
+	local number = whole and string.format("%d", math.floor(size + 0.5)) or string.format("%.2f", size)
+	local sign = value < 0 and "-" or ""
+	if unit == "usd" then
+		return sign .. "$" .. number
+	elseif type(unit) == "string" and unit ~= "" and unit ~= "percent" then
+		return sign .. number .. " " .. unit
+	end
+	return sign .. number
 end
 
 local function counted_use(limit)
@@ -249,25 +307,35 @@ end
 
 local function account_from_report(report, badge)
 	local details = report.metadata or {}
+	local plan = details.subscriptionPlan or details.planType
+	local plan_word = type(plan) == "string" and string.lower(plan) or nil
 	local limits = {}
 	for _, limit in ipairs(report.limits or {}) do
 		if badge.keeps_limit == nil or badge.keeps_limit(report.provider, limit) then
-			local window = limit.window or {}
+			local window = type(limit.window) == "table" and limit.window or {}
+			local id = normal_window(window.id)
+			local window_words = (window.label or "") .. " " .. (window.id or "") .. " " .. id
+			local tier = type((limit.scope or {}).tier) == "string" and string.lower(limit.scope.tier) or nil
+			local amount = type(limit.amount) == "table" and limit.amount or {}
+			local used = used_fraction(amount)
+			local has_balance = used == nil and type(amount.remaining) == "number"
 			table.insert(limits, {
-				distinction = words_only_the_id_says(limit.id, limit.label, (window.label or "") .. " " .. (window.id or "")),
-				window = string.lower(window.id or ""),
-				name = window_name(window.id, window.label),
-				tier = type((limit.scope or {}).tier) == "string" and string.lower(limit.scope.tier) or nil,
-				used = used_fraction(limit.amount),
+				id_words = id_words_the_window_omits(limit.id, window_words),
+				remainder = label_words_the_window_omits(limit.label, window_words),
+				window = id,
+				name = window_name(id, window.label, limit.label or "Usage"),
+				tier = tier ~= plan_word and tier or nil,
+				used = used,
+				left = has_balance and { amount = amount.remaining, unit = amount.unit } or nil,
 				status = limit.status,
-				resets_at = window.resetsAt,
+				resets_at = as_number(window.resetsAt),
 			})
 		end
 	end
 	return {
 		name = email_name(details),
 		credential = type(details.credentialId) == "number" and details.credentialId or nil,
-		plan = details.subscriptionPlan or details.planType,
+		plan = plan,
 		limits = limits,
 	}
 end
@@ -303,17 +371,22 @@ local function accounts_from_history(history, badge, badges)
 				by_account[key] = account
 				table.insert(order, key)
 			end
-			local known = account.limits[entry.limitId]
-			if known == nil or (entry.recordedAt or 0) > known.recorded_at then
+			local limit_id = entry.limitId or entry.label or "?"
+			local recorded_at = as_number(entry.recordedAt) or 0
+			local known = account.limits[limit_id]
+			if known == nil or recorded_at > known.recorded_at then
 				local window = window_id_from_label(entry.windowLabel)
-				account.limits[entry.limitId] = {
-					distinction = words_only_the_id_says(entry.limitId, entry.label, entry.windowLabel),
+				local window_words = (entry.windowLabel or "") .. " " .. window
+				account.limits[limit_id] = {
+					id_words = id_words_the_window_omits(entry.limitId, window_words),
+					remainder = label_words_the_window_omits(entry.label, window_words),
+					order = tostring(limit_id),
 					window = window,
-					name = window_name(window, entry.windowLabel),
+					name = window_name(window, entry.windowLabel, entry.label or "Usage"),
 					used = type(entry.usedFraction) == "number" and clamp01(entry.usedFraction) or nil,
 					status = entry.status,
-					resets_at = entry.resetsAt,
-					recorded_at = entry.recordedAt or 0,
+					resets_at = as_number(entry.resetsAt),
+					recorded_at = recorded_at,
 				}
 			end
 		end
@@ -330,8 +403,10 @@ local function accounts_from_history(history, badge, badges)
 		table.sort(limits, function(a, b)
 			if a.name ~= b.name then
 				return a.name < b.name
+			elseif #a.id_words ~= #b.id_words then
+				return #a.id_words < #b.id_words
 			end
-			return a.distinction < b.distinction
+			return a.order < b.order
 		end)
 		table.insert(accounts, { name = by_account[key].name, limits = limits })
 	end
@@ -404,12 +479,13 @@ local function pool_from_capacity(data, providers, accounts, now)
 			if type(capacity.accounts) == "number" and capacity.accounts > 0 and type(capacity.usedAccounts) == "number" then
 				local meter = type(capacity.meter) == "string" and string.lower(capacity.meter) or nil
 				local tier = (meter ~= nil and tiers[meter]) and meter or nil
-				local name = window_name(capacity.window, capacity.window)
+				local window = normal_window(capacity.window)
+				local name = window_name(window, capacity.window, "Usage")
 				table.insert(windows, {
 					name = tier ~= nil and (capitalize(tier) .. " " .. name) or name,
 					used = clamp01(capacity.usedAccounts / capacity.accounts),
-					resets_at = soonest_reset(accounts, string.lower(capacity.window or ""), tier, now),
-					tier = tier,
+					resets_at = soonest_reset(accounts, window, tier, now),
+					narrow = tier ~= nil,
 				})
 			end
 		end
@@ -423,27 +499,24 @@ local function pool_from_limits(accounts, now)
 		for _, limit in ipairs(account.limits) do
 			local used = counted_use(limit)
 			if used ~= nil then
-				local key = (limit.tier or "") .. "|" .. limit.window
-				local group = groups[key]
+				local group = groups[limit.shown]
 				if group == nil then
-					group = { window = limit.window, name = limit.name, tier = limit.tier, sum = 0, count = 0 }
-					groups[key] = group
-					table.insert(order, key)
+					group = { narrow = limit.narrow, sum = 0, count = 0 }
+					groups[limit.shown] = group
+					table.insert(order, limit.shown)
 				end
 				group.sum = group.sum + used
 				group.count = group.count + 1
+				if limit.resets_at ~= nil and limit.resets_at > now and (group.resets_at == nil or limit.resets_at < group.resets_at) then
+					group.resets_at = limit.resets_at
+				end
 			end
 		end
 	end
 	local windows = {}
-	for _, key in ipairs(order) do
-		local group = groups[key]
-		table.insert(windows, {
-			name = group.tier ~= nil and (capitalize(group.tier) .. " " .. group.name) or group.name,
-			used = clamp01(group.sum / group.count),
-			resets_at = soonest_reset(accounts, group.window, group.tier, now),
-			tier = group.tier,
-		})
+	for _, name in ipairs(order) do
+		local group = groups[name]
+		table.insert(windows, { name = name, used = clamp01(group.sum / group.count), resets_at = group.resets_at, narrow = group.narrow })
 	end
 	return windows
 end
@@ -466,33 +539,80 @@ local function pool_of(data, badge, providers, accounts, from_history, now)
 end
 
 local function tightest_window(pool)
-	local tightest, tightest_of_any_tier = nil, nil
+	local tightest, tightest_of_any = nil, nil
 	for _, window in ipairs(pool) do
-		if tightest_of_any_tier == nil or window.used > tightest_of_any_tier.used then
-			tightest_of_any_tier = window
+		if tightest_of_any == nil or window.used > tightest_of_any.used then
+			tightest_of_any = window
 		end
-		if window.tier == nil and (tightest == nil or window.used > tightest.used) then
+		if not window.narrow and (tightest == nil or window.used > tightest.used) then
 			tightest = window
 		end
 	end
-	return tightest or tightest_of_any_tier
+	return tightest or tightest_of_any
 end
 
-local function limit_names(account)
-	local shared = {}
+local function all_differ(limits, field)
+	local seen = {}
+	for _, limit in ipairs(limits) do
+		if seen[limit[field]] then
+			return false
+		end
+		seen[limit[field]] = true
+	end
+	return true
+end
+
+local function set_own_words(limits)
+	local holders = {}
+	for _, limit in ipairs(limits) do
+		for _, word in ipairs(limit.id_words) do
+			holders[word] = (holders[word] or 0) + 1
+		end
+	end
+	for _, limit in ipairs(limits) do
+		local own = {}
+		for _, word in ipairs(limit.id_words) do
+			if holders[word] < #limits then
+				table.insert(own, word)
+			end
+		end
+		limit.distinction = table.concat(own, "-")
+	end
+end
+
+local function name_limits(account)
+	local sharing = {}
 	for _, limit in ipairs(account.limits) do
 		local key = limit.name .. "|" .. (limit.tier or "")
-		shared[key] = (shared[key] or 0) + 1
+		sharing[key] = sharing[key] or {}
+		table.insert(sharing[key], limit)
 	end
-	local names = {}
-	for i, limit in ipairs(account.limits) do
-		local name = limit.tier ~= nil and (capitalize(limit.tier) .. " " .. limit.name) or limit.name
-		if shared[limit.name .. "|" .. (limit.tier or "")] > 1 and limit.distinction ~= "" then
-			name = name .. " " .. limit.distinction
+	for _, same_name in pairs(sharing) do
+		local tells_apart = nil
+		if #same_name > 1 then
+			set_own_words(same_name)
+			tells_apart = (all_differ(same_name, "distinction") or not all_differ(same_name, "remainder")) and "distinction" or "remainder"
 		end
-		names[i] = name
+		for _, limit in ipairs(same_name) do
+			local suffix = tells_apart ~= nil and limit[tells_apart] or ""
+			local name = limit.tier ~= nil and (capitalize(limit.tier) .. " " .. limit.name) or limit.name
+			limit.shown = suffix ~= "" and (name .. " " .. suffix) or name
+			limit.narrow = limit.tier ~= nil or suffix ~= ""
+		end
 	end
-	return names
+end
+
+local function balance_left(accounts)
+	local total, unit = nil, nil
+	for _, account in ipairs(accounts) do
+		for _, limit in ipairs(account.limits) do
+			if limit.left ~= nil and (total == nil or limit.left.unit == unit) then
+				total = (total or 0) + limit.left.amount
+				unit = limit.left.unit
+			end
+		end
+	end
+	return total ~= nil and { amount = total, unit = unit } or nil
 end
 
 local function loading_state(badge)
@@ -501,7 +621,7 @@ local function loading_state(badge)
 		name = badge.name,
 		icon = badge.icon,
 		summary = "reading omp",
-		accounts = 0,
+		has_limits = false,
 		view = { text = "…", tone = "quiet", title = "Reading usage from omp…" },
 		level = "off",
 		rows = { {} },
@@ -516,23 +636,34 @@ local function state_for(badge, badges, input)
 		accounts, providers = accounts_from_report(input.data, badge, badges)
 		unusable = unusable_credentials(input.data, badge, badges)
 	end
-	local reported = #accounts
-	if reported == 0 and input.history ~= nil then
-		accounts, newest = accounts_from_history(input.history, badge, badges)
-		from_history = #accounts > 0
+	local has_limits = false
+	for _, account in ipairs(accounts) do
+		has_limits = has_limits or #account.limits > 0
+	end
+	if not has_limits and input.history ~= nil then
+		local recorded, recorded_at = accounts_from_history(input.history, badge, badges)
+		if #recorded > 0 then
+			accounts, newest, from_history = recorded, recorded_at, true
+		end
 	end
 	order_and_label(accounts)
+	for _, account in ipairs(accounts) do
+		name_limits(account)
+	end
 
 	local pool = pool_of(input.data, badge, providers, accounts, from_history, now)
 	local tightest = tightest_window(pool)
 	local used = tightest ~= nil and tightest.used or nil
 	local used_up = used ~= nil and percent(used) >= 100
+	local left = used == nil and balance_left(accounts) or nil
 	local text = "n/a"
 	if used ~= nil then
 		text = string.format("%d%%", percent(used))
 		if used_up then
 			text = time_until(tightest.resets_at, now) or text
 		end
+	elseif left ~= nil then
+		text = amount_text(left.amount, left.unit == "usd" and "usd" or nil)
 	end
 
 	local flags = {}
@@ -551,9 +682,10 @@ local function state_for(badge, badges, input)
 		table.insert(lines, without_key_separator(line))
 		table.insert(rows, row or {})
 	end
-	local function meter(name, fraction, resets_at)
-		table.insert(lines, without_key_separator(truncate(name, 14)) .. ": " .. aligned_value(fraction, resets_at, now))
-		table.insert(rows, { fill = fraction or 0, level = level(fraction) })
+	local function meter(name, fraction, resets_at, left)
+		local value = left ~= nil and (amount_text(left.amount, left.unit) .. NBSP .. "left") or aligned_value(fraction, resets_at, now)
+		table.insert(lines, without_key_separator(truncate(name, 14)) .. ": " .. value)
+		table.insert(rows, left ~= nil and { bar = false } or { fill = fraction or 0, level = level(fraction) })
 	end
 	if #accounts > 1 and #pool > 0 then
 		heading(string.format("All %d accounts", #accounts))
@@ -566,9 +698,8 @@ local function state_for(badge, badges, input)
 		if #account.limits == 0 then
 			meter("Usage", nil, nil)
 		end
-		local names = limit_names(account)
-		for i, limit in ipairs(account.limits) do
-			meter(names[i], counted_use(limit), limit.resets_at)
+		for _, limit in ipairs(account.limits) do
+			meter(limit.shown, counted_use(limit), limit.resets_at, limit.left)
 		end
 	end
 	for _, credential in ipairs(unusable) do
@@ -578,8 +709,8 @@ local function state_for(badge, badges, input)
 		heading("omp has no usage data for " .. badge.name)
 	end
 	local footer = "Not read yet"
-	if from_history and newest ~= nil then
-		footer = "From omp's usage history, " .. time_since(now - newest)
+	if from_history then
+		footer = "From omp's usage history" .. ((newest or 0) > 0 and (", " .. time_since(now - newest)) or "")
 	elseif input.fetched_at ~= nil then
 		footer = "Updated " .. time_since(now - input.fetched_at)
 	end
@@ -592,9 +723,11 @@ local function state_for(badge, badges, input)
 	if #accounts > 0 then
 		summary = plural(#accounts, "account")
 		if used_up and tightest.resets_at ~= nil then
-			summary = summary .. ", used up, resets in " .. time_until(tightest.resets_at, now)
+			summary = summary .. ", used up, " .. reset_phrase(tightest.resets_at, now)
 		elseif used ~= nil then
 			summary = summary .. string.format(", %d%% used", percent(used))
+		elseif left ~= nil then
+			summary = summary .. ", " .. amount_text(left.amount, left.unit) .. " left"
 		else
 			summary = summary .. ", no usage data"
 		end
@@ -608,10 +741,10 @@ local function state_for(badge, badges, input)
 		name = badge.name,
 		icon = badge.icon,
 		summary = summary,
-		accounts = reported,
+		has_limits = has_limits,
 		view = { text = text, tone = #flags > 0 and table.concat(flags, " ") or nil, title = table.concat(lines, "\n") },
 		fill = used,
-		level = level(used),
+		level = left ~= nil and "ok" or level(used),
 		rows = rows,
 	}
 end
