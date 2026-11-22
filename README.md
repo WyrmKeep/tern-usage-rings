@@ -103,3 +103,7 @@ USAGE_RINGS_FIXTURE=$PWD/usage.json tern
 ```sh
 tern plugin remove usage-rings
 ```
+
+## License
+
+[MIT](LICENSE)
