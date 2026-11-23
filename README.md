@@ -56,6 +56,14 @@ Claude, Codex, Gemini, OpenCode and Grok are always listed. Any other provider o
 
 The rings are ordinary widgets named `usage-rings/<provider>`, so Tern's widget editor can reorder them.
 
+## On a Stream Deck
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/WyrmKeep/tern-stream-deck/main/screenshots/deck.jpg" width="440" alt="A Stream Deck showing the usage rings above keys for Tern sessions and agents">
+</p>
+
+[Tern Stream Deck](https://github.com/WyrmKeep/tern-stream-deck) puts the same rings on the keys of an Elgato Stream Deck, beside a key for each Tern session and a count of working agents. It shows the reading this plugin keeps, so the deck and the window show the same figures.
+
 ## Good to know
 
 - Figures refresh every five minutes. There is no manual refresh.
